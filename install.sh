@@ -457,10 +457,20 @@ if [[ "${SETUP_SSL,,}" == "s" ]]; then
         WWW_DOMAINS="-d www.$DOMAIN"
     fi
 
-    certbot --$CERTBOT_PLUGIN -d $DOMAIN $WWW_DOMAINS \
-        --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect \
-        && green "  ✓ SSL configurado" \
-        || yellow "  ⚠ SSL falló — una vez el DNS apunte al VPS ejecuta: certbot --$CERTBOT_PLUGIN -d $DOMAIN"
+    if certbot --$CERTBOT_PLUGIN -d $DOMAIN $WWW_DOMAINS \
+        --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect 2>/dev/null; then
+        green "  ✓ SSL configurado"
+        # Actualizar URL a https solo si SSL fue exitoso
+        $WP option update siteurl "https://$DOMAIN" --quiet 2>/dev/null
+        $WP option update home    "https://$DOMAIN" --quiet 2>/dev/null
+    else
+        # SSL falló: eliminar cualquier redirect que certbot haya dejado en el vhost
+        sudo sed -i '/RewriteEngine\|RewriteRule.*https/d' /etc/apache2/sites-available/$DOMAIN.conf 2>/dev/null
+        sudo service apache2 reload 2>/dev/null
+        yellow "  ⚠ SSL no configurado (DNS no apunta aún al VPS)"
+        yellow "    El sitio funciona en HTTP. Cuando el DNS esté listo ejecuta:"
+        yellow "    certbot --$CERTBOT_PLUGIN -d $DOMAIN --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect"
+    fi
 fi
 
 # Actualizar URL del sitio a https si hay SSL
