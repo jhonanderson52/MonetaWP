@@ -146,7 +146,22 @@ if [[ -z "$DB_NAME" ]]; then DB_NAME="${DOMAIN//./_}_db"; fi
 read -p "  Usuario MySQL (ej: root): " DB_USER_MYSQL
 if [[ -z "$DB_USER_MYSQL" ]]; then DB_USER_MYSQL="root"; fi
 
-read -s -p "  Contraseña MySQL: " DB_PASS_MYSQL; echo ""
+DB_PASS_MYSQL=""
+DB_MYSQL_OK=0
+for _attempt in 1 2 3; do
+    read -s -p "  Contraseña MySQL (intento $_attempt/3): " DB_PASS_MYSQL; echo ""
+    if mysql -u "$DB_USER_MYSQL" -p"$DB_PASS_MYSQL" -e "SELECT 1;" &>/dev/null 2>&1; then
+        green "  ✓ Conexión MySQL verificada"
+        DB_MYSQL_OK=1
+        break
+    else
+        if [[ $_attempt -lt 3 ]]; then
+            red "  ✗ Contraseña incorrecta, intenta de nuevo."
+        else
+            die "Contraseña MySQL incorrecta después de 3 intentos. Instalación cancelada."
+        fi
+    fi
+done
 
 DB_WP_USER="${DOMAIN//./_}_wp"
 # Generar contraseña que cumple cualquier política MySQL (upper+lower+digit+special)
@@ -240,26 +255,25 @@ green "  ✓ Tema MonetaWP activado"
 
 # ── I. Plugins ────────────────────────────────────────────────────────────────
 step "Instalando plugins..."
-PLUGINS_URL="https://github.com/jhonanderson52/MonetaWP/raw/main/plugins"
+PLUGINS_RAW="https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/plugins"
 
 install_plugin() {
     local slug=$1 label=$2 github_zip=$3
-    # Intentar primero desde el repo (evita bloqueos de red a wordpress.org)
+
     if [[ -n "$github_zip" ]]; then
-        $WP plugin install "$PLUGINS_URL/$github_zip" --activate --force 2>/dev/null
+        # Descargar con curl primero (WP-CLI no sigue bien redirects de GitHub)
+        local tmp_zip="/tmp/${github_zip}"
+        curl -fsSL -o "$tmp_zip" "$PLUGINS_RAW/$github_zip" 2>/dev/null
+        $WP plugin install "$tmp_zip" --activate --force 2>/dev/null
+        rm -f "$tmp_zip"
     else
         $WP plugin install "$slug" --activate --force 2>/dev/null
     fi
+
     if $WP plugin is-installed "$slug" 2>/dev/null; then
         green "    ✓ $label"
     else
-        # Segundo intento directo desde WordPress.org
-        $WP plugin install "$slug" --activate --force 2>/dev/null
-        if $WP plugin is-installed "$slug" 2>/dev/null; then
-            green "    ✓ $label"
-        else
-            yellow "    ✗ $label falló. Instala manualmente después: wp plugin install $slug --activate"
-        fi
+        yellow "    ✗ $label falló. Instala manualmente: wp plugin install $slug --activate"
     fi
 }
 
@@ -267,6 +281,10 @@ install_plugin "seo-by-rank-math"         "Rank Math SEO"          "seo-by-rank-
 install_plugin "litespeed-cache"          "LiteSpeed Cache"        ""
 install_plugin "easy-table-of-contents"   "Easy Table of Contents" ""
 install_plugin "contact-form-7"           "Contact Form 7"         "contact-form-7.zip"
+
+# Eliminar plugins por defecto de WordPress que no se necesitan
+step "Eliminando plugins innecesarios..."
+$WP plugin delete hello akismet 2>/dev/null && green "  ✓ Hello Dolly y Akismet eliminados" || true
 
 # ── J. Permalinks ─────────────────────────────────────────────────────────────
 step "Configurando permalinks..."
