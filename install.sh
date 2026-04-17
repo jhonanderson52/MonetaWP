@@ -5,7 +5,6 @@
 # Uso: curl -fsSL https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/install.sh -o /tmp/install.sh && sudo bash /tmp/install.sh
 # ==============================================================================
 
-set -e
 THEME_URL="https://github.com/jhonanderson52/MonetaWP/raw/main/theme/MonetaWP.zip"
 WP_USER="www-data"
 
@@ -26,10 +25,9 @@ step()   { echo ""; echo -e "\e[36m▶ $*\e[0m"; }
 
 die() { red "❌ ERROR: $*"; exit 1; }
 
-require_root() {
-    [[ $EUID -ne 0 ]] && die "Ejecuta el script como root: sudo bash install.sh"
-}
-require_root
+if [[ $EUID -ne 0 ]]; then
+    die "Ejecuta el script como root: sudo bash /tmp/install.sh"
+fi
 
 # ── B. Verificación de requisitos ─────────────────────────────────────────────
 step "Verificando entorno del VPS..."
@@ -54,7 +52,7 @@ else
     echo ""
     echo "  Instalar PHP puede afectar otros servicios si los hay."
     read -p "  ¿Instalar PHP ahora? [s/N]: " INSTALL_PHP
-    [[ "${INSTALL_PHP,,}" != "s" ]] && die "PHP es necesario para WordPress. Instálalo manualmente y vuelve a ejecutar."
+    if [[ "${INSTALL_PHP,,}" != "s" ]]; then die "PHP es necesario para WordPress. Instálalo manualmente y vuelve a ejecutar."; fi
     apt-get install -y php php-mysql php-curl php-xml php-mbstring php-zip php-gd php-intl 2>&1 | grep -E 'install|already'
     PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
     green "  ✓ PHP $PHP_VER instalado"
@@ -118,7 +116,7 @@ echo "  ────────────────────────
 echo ""
 
 read -p "  Dominio (sin https://, ej: mi-sitio.com): " DOMAIN
-[[ -z "$DOMAIN" ]] && die "El dominio es obligatorio."
+if [[ -z "$DOMAIN" ]]; then die "El dominio es obligatorio."; fi
 
 # Verificar que el dominio no existe ya
 if [[ -d "/var/www/html/$DOMAIN" ]]; then
@@ -126,27 +124,27 @@ if [[ -d "/var/www/html/$DOMAIN" ]]; then
 fi
 
 read -p "  Nombre del sitio (ej: Mi Blog de Salud): " SITE_NAME
-[[ -z "$SITE_NAME" ]] && SITE_NAME="Mi Sitio Web"
+if [[ -z "$SITE_NAME" ]]; then SITE_NAME="Mi Sitio Web"; fi
 
 read -p "  Nicho del sitio (ej: salud, finanzas, tecnología): " NICHE
-[[ -z "$NICHE" ]] && NICHE="información"
+if [[ -z "$NICHE" ]]; then NICHE="información"; fi
 
 read -p "  Usuario administrador WordPress (ej: admin): " WP_ADMIN_USER
-[[ -z "$WP_ADMIN_USER" ]] && WP_ADMIN_USER="admin"
+if [[ -z "$WP_ADMIN_USER" ]]; then WP_ADMIN_USER="admin"; fi
 
 read -p "  Email administrador: " WP_ADMIN_EMAIL
-[[ -z "$WP_ADMIN_EMAIL" ]] && die "El email es obligatorio."
+if [[ -z "$WP_ADMIN_EMAIL" ]]; then die "El email es obligatorio."; fi
 
 read -s -p "  Contraseña administrador: " WP_ADMIN_PASS; echo ""
-[[ -z "$WP_ADMIN_PASS" ]] && die "La contraseña es obligatoria."
+if [[ -z "$WP_ADMIN_PASS" ]]; then die "La contraseña es obligatoria."; fi
 
 echo ""
 echo "  ─── Base de datos ────────────────────────────────────"
 read -p "  Nombre de la base de datos (ej: ${DOMAIN//./_}_db): " DB_NAME
-[[ -z "$DB_NAME" ]] && DB_NAME="${DOMAIN//./_}_db"
+if [[ -z "$DB_NAME" ]]; then DB_NAME="${DOMAIN//./_}_db"; fi
 
 read -p "  Usuario MySQL (ej: root): " DB_USER_MYSQL
-[[ -z "$DB_USER_MYSQL" ]] && DB_USER_MYSQL="root"
+if [[ -z "$DB_USER_MYSQL" ]]; then DB_USER_MYSQL="root"; fi
 
 read -s -p "  Contraseña MySQL: " DB_PASS_MYSQL; echo ""
 
@@ -169,7 +167,7 @@ echo "    WordPress:  $WP_VERSION"
 echo "    Servidor:   $WEB_SERVER"
 echo "  ─────────────────────────────────────────────────────"
 read -p "  ¿Iniciar instalación? [S/n]: " CONFIRM_INSTALL
-[[ "${CONFIRM_INSTALL,,}" == "n" ]] && { echo "Instalación cancelada."; exit 0; }
+if [[ "${CONFIRM_INSTALL,,}" == "n" ]]; then echo "Instalación cancelada."; exit 0; fi
 
 WP="sudo -u $WP_USER wp --path=/var/www/html/$DOMAIN"
 
