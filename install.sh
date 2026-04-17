@@ -260,17 +260,23 @@ PLUGINS_RAW="https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/plug
 install_plugin() {
     local slug=$1 label=$2 github_zip=$3
 
+    # Intentar primero desde WordPress.org (más rápido y siempre actualizado)
+    if $WP plugin install "$slug" --activate --force --quiet 2>/dev/null; then
+        green "    ✓ $label"
+        return 0
+    fi
+
+    # Si WordPress.org falla, usar el zip de GitHub como respaldo
     if [[ -n "$github_zip" ]]; then
-        # Descargar con curl primero (WP-CLI no sigue bien redirects de GitHub)
         local tmp_zip="/tmp/${github_zip}"
-        curl -fsSL -o "$tmp_zip" "$PLUGINS_RAW/$github_zip" 2>/dev/null
-        $WP plugin install "$tmp_zip" --activate --force 2>/dev/null
-        rm -f "$tmp_zip"
-    else
-        $WP plugin install "$slug" --activate --force 2>/dev/null
+        if curl -fsSL -o "$tmp_zip" "$PLUGINS_RAW/$github_zip" 2>/dev/null && [[ -s "$tmp_zip" ]]; then
+            $WP plugin install "$tmp_zip" --activate --force --quiet 2>/dev/null
+            rm -f "$tmp_zip"
+        fi
     fi
 
     if $WP plugin is-installed "$slug" 2>/dev/null; then
+        $WP plugin activate "$slug" --quiet 2>/dev/null || true
         green "    ✓ $label"
     else
         yellow "    ✗ $label falló. Instala manualmente: wp plugin install $slug --activate"
@@ -286,21 +292,26 @@ install_plugin "contact-form-7"           "Contact Form 7"         "contact-form
 step "Eliminando plugins innecesarios..."
 $WP plugin delete hello akismet 2>/dev/null && green "  ✓ Hello Dolly y Akismet eliminados" || true
 
+# ── J. Temas por defecto ──────────────────────────────────────────────────────
+step "Eliminando temas por defecto..."
+for _theme in twentytwentyone twentytwentytwo twentytwentythree twentytwentyfour twentytwentyfive; do
+    $WP theme delete "$_theme" --quiet 2>/dev/null || true
+done
+green "  ✓ Solo MonetaWP activo"
+
 # ── J. Limpiar páginas automáticas ────────────────────────────────────────────
 step "Eliminando páginas automáticas de WordPress y plugins..."
-# WordPress instala "Página de ejemplo" y "Política de privacidad" (borrador)
-# Rank Math crea "Terms and Conditions" al activarse
-for _slug in sample-page privacy-policy terms-and-conditions; do
-    _ids=$($WP post list --post_type=page --name="$_slug" --format=ids 2>/dev/null || true)
-    if [[ -n "$_ids" ]]; then
-        $WP post delete $_ids --force --quiet 2>/dev/null || true
-    fi
-done
+# Borrar TODAS las páginas existentes (es_ES crea slugs distintos a los ingleses)
+# así evitamos duplicados con sufijo -2 al crear las nuestras
+_all_page_ids=$($WP post list --post_type=page --post_status=any --format=ids --posts_per_page=-1 2>/dev/null || true)
+if [[ -n "$_all_page_ids" ]]; then
+    $WP post delete $_all_page_ids --force --quiet 2>/dev/null || true
+fi
 green "  ✓ Páginas automáticas eliminadas"
 
 # ── J. Permalinks ─────────────────────────────────────────────────────────────
 step "Configurando permalinks..."
-$WP rewrite structure '/%postname%/' --hard --quiet
+$WP rewrite structure '/%postname%/' --quiet 2>/dev/null || true
 green "  ✓ Permalinks configurados"
 
 # ── K. Páginas obligatorias AdSense ──────────────────────────────────────────
@@ -380,14 +391,28 @@ green "  ✓ 5 posts de muestra creados"
 
 # ── M. Menú principal ─────────────────────────────────────────────────────────
 step "Creando menú de navegación..."
+# Borrar menús previos para evitar que --porcelain devuelva vacío por nombre duplicado
+_old_menus=$($WP menu list --format=ids 2>/dev/null || true)
+if [[ -n "$_old_menus" ]]; then
+    for _mid in $_old_menus; do
+        $WP menu delete "$_mid" --quiet 2>/dev/null || true
+    done
+fi
+
 MENU_ID=$($WP menu create "Principal" --porcelain 2>/dev/null)
-$WP menu item add-post $MENU_ID $PRIV_ID --quiet 2>/dev/null
-$WP menu item add-post $MENU_ID $COOK_ID --quiet 2>/dev/null
-$WP menu item add-post $MENU_ID $LEGAL_ID --quiet 2>/dev/null
-$WP menu item add-post $MENU_ID $ABOUT_ID --quiet 2>/dev/null
-$WP menu item add-post $MENU_ID $CONT_ID --quiet 2>/dev/null
-$WP menu location assign $MENU_ID primary --quiet 2>/dev/null
-green "  ✓ Menú principal creado con 5 páginas"
+if [[ -n "$MENU_ID" ]] && [[ "$MENU_ID" =~ ^[0-9]+$ ]]; then
+    $WP menu item add-post "$MENU_ID" "$ABOUT_ID" --quiet 2>/dev/null || true
+    $WP menu item add-post "$MENU_ID" "$CONT_ID"  --quiet 2>/dev/null || true
+    $WP menu item add-post "$MENU_ID" "$PRIV_ID"  --quiet 2>/dev/null || true
+    $WP menu item add-post "$MENU_ID" "$COOK_ID"  --quiet 2>/dev/null || true
+    $WP menu item add-post "$MENU_ID" "$LEGAL_ID" --quiet 2>/dev/null || true
+    $WP menu location assign "$MENU_ID" primary --quiet 2>/dev/null || true
+    $WP menu location assign "$MENU_ID" footer  --quiet 2>/dev/null || true
+    $WP menu location assign "$MENU_ID" legal   --quiet 2>/dev/null || true
+    green "  ✓ Menú principal creado con 5 páginas (ID: $MENU_ID)"
+else
+    yellow "  ⚠ No se pudo crear el menú automáticamente."
+fi
 
 # ── N. Customizer defaults ────────────────────────────────────────────────────
 step "Aplicando configuración del tema..."
@@ -466,9 +491,6 @@ VHOST
     a2enmod rewrite --quiet
     service apache2 reload
     green "  ✓ VHost Apache configurado"
-    # Refrescar .htaccess ahora que mod_rewrite está activo
-    $WP rewrite flush --hard --quiet 2>/dev/null || true
-    green "  ✓ Reglas de reescritura actualizadas"
 
 elif [[ "$WEB_SERVER" == "nginx" ]]; then
     cat > /etc/nginx/sites-available/$DOMAIN <<VHOST
@@ -491,9 +513,27 @@ VHOST
     ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
     nginx -s reload
     green "  ✓ VHost Nginx configurado"
-    $WP rewrite flush --hard --quiet 2>/dev/null || true
-    green "  ✓ Reglas de reescritura actualizadas"
 fi
+
+# Escribir .htaccess con reglas WordPress manualmente
+# wp rewrite flush --hard falla cuando LiteSpeed Cache ya modificó el archivo
+HTACCESS_FILE="/var/www/html/$DOMAIN/.htaccess"
+if ! grep -q "BEGIN WordPress" "$HTACCESS_FILE" 2>/dev/null; then
+    cat >> "$HTACCESS_FILE" <<'HTACCESS'
+# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress
+HTACCESS
+    chown $WP_USER:$WP_USER "$HTACCESS_FILE"
+fi
+green "  ✓ Reglas de reescritura en .htaccess"
 
 # SSL con Let's Encrypt
 if [[ "${SETUP_SSL,,}" == "s" ]]; then
