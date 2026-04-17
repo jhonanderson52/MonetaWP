@@ -240,10 +240,27 @@ green "  ✓ Tema MonetaWP activado"
 
 # ── I. Plugins ────────────────────────────────────────────────────────────────
 step "Instalando plugins..."
-$WP plugin install rank-math-seo --activate --quiet && green "    ✓ Rank Math SEO"
-$WP plugin install litespeed-cache --activate --quiet && green "    ✓ LiteSpeed Cache"
-$WP plugin install easy-table-of-contents --activate --quiet && green "    ✓ Easy Table of Contents"
-$WP plugin install contact-form-7 --activate --quiet && green "    ✓ Contact Form 7"
+install_plugin() {
+    local slug=$1 label=$2
+    local out
+    out=$($WP plugin install "$slug" --activate 2>&1)
+    if $WP plugin is-installed "$slug" 2>/dev/null; then
+        green "    ✓ $label"
+    else
+        yellow "    ⚠ $label no se instaló — reintentando..."
+        out=$($WP plugin install "$slug" --activate --force 2>&1)
+        if $WP plugin is-installed "$slug" 2>/dev/null; then
+            green "    ✓ $label (segundo intento)"
+        else
+            yellow "    ✗ $label falló. Instala manualmente: wp plugin install $slug --activate"
+        fi
+    fi
+}
+
+install_plugin "rank-math-seo"            "Rank Math SEO"
+install_plugin "litespeed-cache"          "LiteSpeed Cache"
+install_plugin "easy-table-of-contents"   "Easy Table of Contents"
+install_plugin "contact-form-7"           "Contact Form 7"
 
 # ── J. Permalinks ─────────────────────────────────────────────────────────────
 step "Configurando permalinks..."
