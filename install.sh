@@ -515,19 +515,45 @@ if [[ "${SETUP_SSL,,}" == "s" ]]; then
         WWW_DOMAINS="-d www.$DOMAIN"
     fi
 
+    # Deshabilitar SSL vhost previo si existe (evita "addresses conflict" en reinsalaciones)
+    if [[ -f "/etc/apache2/sites-available/$DOMAIN-le-ssl.conf" ]]; then
+        a2dissite "$DOMAIN-le-ssl.conf" --quiet 2>/dev/null || true
+    fi
+
+    # Obtener/renovar certificado sin tocar el redirect (lo hacemos manualmente)
     if certbot --$CERTBOT_PLUGIN -d $DOMAIN $WWW_DOMAINS \
-        --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect 2>/dev/null; then
-        green "  ✓ SSL configurado"
-        # Actualizar URL a https solo si SSL fue exitoso
+        --non-interactive --agree-tos -m $WP_ADMIN_EMAIL 2>/dev/null; then
+
+        # Agregar redirect HTTP → HTTPS directamente en el vhost HTTP
+        if [[ "$WEB_SERVER" == "apache2" ]]; then
+            cat > /etc/apache2/sites-available/$DOMAIN.conf <<VHOST
+<VirtualHost *:80>
+    ServerName $DOMAIN
+    ServerAlias www.$DOMAIN
+    DocumentRoot /var/www/html/$DOMAIN
+    RewriteEngine On
+    RewriteCond %{HTTPS} off
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+    ErrorLog \${APACHE_LOG_DIR}/$DOMAIN-error.log
+    CustomLog \${APACHE_LOG_DIR}/$DOMAIN-access.log combined
+</VirtualHost>
+VHOST
+            service apache2 reload
+        elif [[ "$WEB_SERVER" == "nginx" ]]; then
+            # Nginx: agregar return 301 al server block de puerto 80
+            sed -i 's|try_files.*|return 301 https://\$host\$request_uri;|' \
+                /etc/nginx/sites-available/$DOMAIN 2>/dev/null
+            nginx -s reload
+        fi
+
+        green "  ✓ SSL configurado y redirect HTTP→HTTPS activo"
         $WP option update siteurl "https://$DOMAIN" --quiet 2>/dev/null
         $WP option update home    "https://$DOMAIN" --quiet 2>/dev/null
+        $WP rewrite flush --hard --quiet 2>/dev/null || true
     else
-        # SSL falló: eliminar cualquier redirect que certbot haya dejado en el vhost
-        sudo sed -i '/RewriteEngine\|RewriteRule.*https/d' /etc/apache2/sites-available/$DOMAIN.conf 2>/dev/null
-        sudo service apache2 reload 2>/dev/null
-        yellow "  ⚠ SSL no configurado (DNS no apunta aún al VPS)"
+        yellow "  ⚠ SSL no configurado (¿el DNS apunta al VPS?)"
         yellow "    El sitio funciona en HTTP. Cuando el DNS esté listo ejecuta:"
-        yellow "    certbot --$CERTBOT_PLUGIN -d $DOMAIN --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect"
+        yellow "    certbot --$CERTBOT_PLUGIN -d $DOMAIN --non-interactive --agree-tos -m $WP_ADMIN_EMAIL"
     fi
 fi
 
