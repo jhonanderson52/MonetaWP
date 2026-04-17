@@ -149,7 +149,8 @@ if [[ -z "$DB_USER_MYSQL" ]]; then DB_USER_MYSQL="root"; fi
 read -s -p "  Contraseña MySQL: " DB_PASS_MYSQL; echo ""
 
 DB_WP_USER="${DOMAIN//./_}_wp"
-DB_WP_PASS=$(tr -dc 'A-Za-z0-9!@#' < /dev/urandom | head -c 16)
+# Generar contraseña que cumple cualquier política MySQL (upper+lower+digit+special)
+DB_WP_PASS="Mwp$(tr -dc 'a-z' </dev/urandom | head -c 6)$(tr -dc 'A-Z' </dev/urandom | head -c 4)$(tr -dc '0-9' </dev/urandom | head -c 4)@$(tr -dc 'a-z' </dev/urandom | head -c 3)"
 
 echo ""
 echo "  ─── SSL ──────────────────────────────────────────────"
@@ -173,12 +174,22 @@ WP="sudo -u $WP_USER wp --path=/var/www/html/$DOMAIN"
 
 # ── D. Base de datos ──────────────────────────────────────────────────────────
 step "Creando base de datos..."
-mysql -u "$DB_USER_MYSQL" -p"$DB_PASS_MYSQL" <<SQL
+# Bajar temporalmente la política de contraseñas MySQL si está activa
+mysql -u "$DB_USER_MYSQL" -p"$DB_PASS_MYSQL" -e "SET GLOBAL validate_password.policy=LOW; SET GLOBAL validate_password.length=8;" 2>/dev/null || \
+mysql -u "$DB_USER_MYSQL" -p"$DB_PASS_MYSQL" -e "SET GLOBAL validate_password_policy=LOW; SET GLOBAL validate_password_length=8;" 2>/dev/null || true
+
+mysql -u "$DB_USER_MYSQL" -p"$DB_PASS_MYSQL" <<SQL 2>/dev/null
 CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '$DB_WP_USER'@'localhost' IDENTIFIED BY '$DB_WP_PASS';
 GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_WP_USER'@'localhost';
 FLUSH PRIVILEGES;
 SQL
+
+# Verificar que la BD se creó correctamente
+DB_CHECK=$(mysql -u "$DB_USER_MYSQL" -p"$DB_PASS_MYSQL" -sse "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$DB_NAME';" 2>/dev/null)
+if [[ -z "$DB_CHECK" ]]; then
+    die "No se pudo crear la base de datos '$DB_NAME'. Verifica usuario y contraseña MySQL."
+fi
 green "  ✓ Base de datos '$DB_NAME' creada"
 
 # ── E. Directorio web ─────────────────────────────────────────────────────────
@@ -205,6 +216,10 @@ sudo -u $WP_USER wp --path=/var/www/html/$DOMAIN config create \
     --locale=es_ES \
     --quiet
 $WP config set WP_DEBUG false --raw --quiet
+
+if [[ ! -f "/var/www/html/$DOMAIN/wp-config.php" ]]; then
+    die "wp-config.php no se pudo crear. Verifica las credenciales de la base de datos."
+fi
 green "  ✓ wp-config.php creado"
 
 # ── WordPress install ──────────────────────────────────────────────────────────
@@ -402,18 +417,21 @@ fi
 # SSL con Let's Encrypt
 if [[ "${SETUP_SSL,,}" == "s" ]]; then
     step "Configurando SSL con Let's Encrypt..."
-    if command -v certbot &>/dev/null; then
-        certbot --$WEB_SERVER -d $DOMAIN -d www.$DOMAIN \
-            --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect \
-            && green "  ✓ SSL configurado" \
-            || yellow "  ⚠ SSL falló — verifica que el dominio apunte a este VPS"
+    # Mapear nombre del servicio al plugin de certbot (apache2 → apache)
+    if [[ "$WEB_SERVER" == "apache2" ]]; then
+        CERTBOT_PLUGIN="apache"
     else
-        apt-get install -y certbot python3-certbot-$WEB_SERVER 2>&1 | grep -E 'install|already'
-        certbot --$WEB_SERVER -d $DOMAIN -d www.$DOMAIN \
-            --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect \
-            && green "  ✓ SSL configurado" \
-            || yellow "  ⚠ SSL falló — verifica que el dominio apunte a este VPS"
+        CERTBOT_PLUGIN="nginx"
     fi
+
+    if ! command -v certbot &>/dev/null; then
+        apt-get install -y certbot python3-certbot-$CERTBOT_PLUGIN 2>&1 | grep -E 'install|already'
+    fi
+
+    certbot --$CERTBOT_PLUGIN -d $DOMAIN -d www.$DOMAIN \
+        --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect \
+        && green "  ✓ SSL configurado" \
+        || yellow "  ⚠ SSL falló — verifica que el dominio apunte a este VPS y vuelve a ejecutar: certbot --$CERTBOT_PLUGIN -d $DOMAIN"
 fi
 
 # Actualizar URL del sitio a https si hay SSL
