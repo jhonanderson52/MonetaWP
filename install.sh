@@ -240,7 +240,7 @@ green "  ✓ wp-config.php creado"
 # ── WordPress install ──────────────────────────────────────────────────────────
 step "Instalando WordPress..."
 $WP core install \
-    --url="https://$DOMAIN" \
+    --url="http://$DOMAIN" \
     --title="$SITE_NAME" \
     --admin_user="$WP_ADMIN_USER" \
     --admin_email="$WP_ADMIN_EMAIL" \
@@ -285,6 +285,18 @@ install_plugin "contact-form-7"           "Contact Form 7"         "contact-form
 # Eliminar plugins por defecto de WordPress que no se necesitan
 step "Eliminando plugins innecesarios..."
 $WP plugin delete hello akismet 2>/dev/null && green "  ✓ Hello Dolly y Akismet eliminados" || true
+
+# ── J. Limpiar páginas automáticas ────────────────────────────────────────────
+step "Eliminando páginas automáticas de WordPress y plugins..."
+# WordPress instala "Página de ejemplo" y "Política de privacidad" (borrador)
+# Rank Math crea "Terms and Conditions" al activarse
+for _slug in sample-page privacy-policy terms-and-conditions; do
+    _ids=$($WP post list --post_type=page --name="$_slug" --format=ids 2>/dev/null || true)
+    if [[ -n "$_ids" ]]; then
+        $WP post delete $_ids --force --quiet 2>/dev/null || true
+    fi
+done
+green "  ✓ Páginas automáticas eliminadas"
 
 # ── J. Permalinks ─────────────────────────────────────────────────────────────
 step "Configurando permalinks..."
@@ -379,8 +391,31 @@ green "  ✓ Menú principal creado con 5 páginas"
 
 # ── N. Customizer defaults ────────────────────────────────────────────────────
 step "Aplicando configuración del tema..."
+# Sobreescribir todos los textos hardcodeados del nicho original (convocatorias/becas)
+# con texto genérico basado en el nicho y nombre del sitio ingresados por el usuario
 $WP option update theme_mods_MonetaWP \
-    "{\"mw_hero_title\":\"Bienvenido a $SITE_NAME\",\"mw_featured_visible\":true,\"mw_nav_layout\":\"right\",\"mw_pills_title\":\"Explorar por Categoría\"}" \
+    "{
+      \"mw_hero_title\":       \"Bienvenido a $SITE_NAME\",
+      \"mw_hero_subtitle\":    \"Tu fuente de información sobre $NICHE. Contenido actualizado y fácil de entender.\",
+      \"mw_hero_cta1_text\":   \"Ver artículos\",
+      \"mw_hero_cta1_url\":    \"/blog/\",
+      \"mw_hero_cta1_icon\":   \"📖\",
+      \"mw_hero_cta2_text\":   \"Categorías\",
+      \"mw_hero_cta2_url\":    \"/categoria/\",
+      \"mw_hero_cta2_icon\":   \"🗂️\",
+      \"mw_hero_cta3_text\":   \"Sobre Nosotros\",
+      \"mw_hero_cta3_url\":    \"/sobre-nosotros/\",
+      \"mw_hero_cta3_icon\":   \"ℹ️\",
+      \"mw_pills_title\":      \"Explorar por Categoría\",
+      \"mw_pills_enable\":     0,
+      \"mw_featured_visible\": true,
+      \"mw_featured_cta_text\":\"Ver todos los artículos →\",
+      \"mw_featured_cta_url\": \"/blog/\",
+      \"mw_latest_title\":     \"Últimos Artículos sobre $NICHE\",
+      \"mw_latest_cta_text\":  \"Ver todos los artículos →\",
+      \"mw_latest_cta_url\":   \"/blog/\",
+      \"mw_nav_layout\":       \"right\"
+    }" \
     --format=json --quiet 2>/dev/null
 green "  ✓ Configuración del tema aplicada"
 
@@ -431,6 +466,9 @@ VHOST
     a2enmod rewrite --quiet
     service apache2 reload
     green "  ✓ VHost Apache configurado"
+    # Refrescar .htaccess ahora que mod_rewrite está activo
+    $WP rewrite flush --hard --quiet 2>/dev/null || true
+    green "  ✓ Reglas de reescritura actualizadas"
 
 elif [[ "$WEB_SERVER" == "nginx" ]]; then
     cat > /etc/nginx/sites-available/$DOMAIN <<VHOST
@@ -453,6 +491,8 @@ VHOST
     ln -sf /etc/nginx/sites-available/$DOMAIN /etc/nginx/sites-enabled/$DOMAIN
     nginx -s reload
     green "  ✓ VHost Nginx configurado"
+    $WP rewrite flush --hard --quiet 2>/dev/null || true
+    green "  ✓ Reglas de reescritura actualizadas"
 fi
 
 # SSL con Let's Encrypt
@@ -489,12 +529,6 @@ if [[ "${SETUP_SSL,,}" == "s" ]]; then
         yellow "    El sitio funciona en HTTP. Cuando el DNS esté listo ejecuta:"
         yellow "    certbot --$CERTBOT_PLUGIN -d $DOMAIN --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect"
     fi
-fi
-
-# Actualizar URL del sitio a https si hay SSL
-if [[ "${SETUP_SSL,,}" == "s" ]]; then
-    $WP option update siteurl "https://$DOMAIN" --quiet 2>/dev/null
-    $WP option update home    "https://$DOMAIN" --quiet 2>/dev/null
 fi
 
 # ── R. Resumen final ──────────────────────────────────────────────────────────
