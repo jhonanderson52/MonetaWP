@@ -7,7 +7,7 @@ Tema WordPress diseñado para la creación rápida de sitios de contenido moneti
 ## Instalación en un comando
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/install.sh -o /tmp/install.sh && sudo bash /tmp/install.sh
 ```
 
 > Ejecutar como **root** o con **sudo** en un VPS Ubuntu 20.04 / 22.04.
@@ -61,17 +61,10 @@ Contraseña MySQL            → (oculta)
 
 ---
 
-## Instalación manual (sin curl)
+## Instalación alternativa (con wget)
 
 ```bash
-# 1. Descargar el script
-wget https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/install.sh
-
-# 2. Dar permisos
-chmod +x install.sh
-
-# 3. Ejecutar
-sudo bash install.sh
+wget -O /tmp/install.sh https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/install.sh && sudo bash /tmp/install.sh
 ```
 
 ---

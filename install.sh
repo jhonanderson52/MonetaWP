@@ -2,7 +2,7 @@
 # ==============================================================================
 # MonetaWP Installer v1.0
 # Instala WordPress + tema MonetaWP + plugins + páginas AdSense en un VPS Ubuntu
-# Uso: bash <(curl -fsSL https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/install.sh)
+# Uso: curl -fsSL https://raw.githubusercontent.com/jhonanderson52/MonetaWP/main/install.sh -o /tmp/install.sh && sudo bash /tmp/install.sh
 # ==============================================================================
 
 set -e
