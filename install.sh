@@ -509,20 +509,19 @@ if [[ "${SETUP_SSL,,}" == "s" ]]; then
         apt-get install -y certbot python3-certbot-$CERTBOT_PLUGIN 2>&1 | grep -E 'install|already'
     fi
 
-    # Detectar si www.DOMAIN resuelve — solo incluirlo si tiene DNS
-    WWW_DOMAINS=""
-    if host "www.$DOMAIN" &>/dev/null 2>&1; then
-        WWW_DOMAINS="-d www.$DOMAIN"
-    fi
-
-    # Deshabilitar SSL vhost previo si existe (evita "addresses conflict" en reinsalaciones)
+    # Eliminar SSL vhost previo si existe para que certbot lo recree limpio
+    # (un vhost previo con distinto SAN causa conflicto si se agrega/quita www)
     if [[ -f "/etc/apache2/sites-available/$DOMAIN-le-ssl.conf" ]]; then
         a2dissite "$DOMAIN-le-ssl.conf" --quiet 2>/dev/null || true
+        rm -f "/etc/apache2/sites-available/$DOMAIN-le-ssl.conf"
+        service apache2 reload 2>/dev/null || true
     fi
 
-    # Obtener/renovar certificado sin tocar el redirect (lo hacemos manualmente)
-    if certbot --$CERTBOT_PLUGIN -d $DOMAIN $WWW_DOMAINS \
-        --non-interactive --agree-tos -m $WP_ADMIN_EMAIL 2>/dev/null; then
+    # Solicitar certificado solo para el dominio principal (sin www)
+    # Agregar www solo si existe DNS Y no hay cert previo con SAN diferente
+    CERTBOT_LOG="/tmp/certbot-$DOMAIN.log"
+    if certbot --$CERTBOT_PLUGIN -d $DOMAIN \
+        --non-interactive --agree-tos -m $WP_ADMIN_EMAIL >"$CERTBOT_LOG" 2>&1; then
 
         # Agregar redirect HTTP → HTTPS directamente en el vhost HTTP
         if [[ "$WEB_SERVER" == "apache2" ]]; then
@@ -551,8 +550,10 @@ VHOST
         $WP option update home    "https://$DOMAIN" --quiet 2>/dev/null
         $WP rewrite flush --hard --quiet 2>/dev/null || true
     else
-        yellow "  ⚠ SSL no configurado (¿el DNS apunta al VPS?)"
-        yellow "    El sitio funciona en HTTP. Cuando el DNS esté listo ejecuta:"
+        yellow "  ⚠ SSL no configurado. Detalle del error:"
+        grep -E 'Error|error|Failed|failed|Unable|unable|IMPORTANT' "$CERTBOT_LOG" 2>/dev/null | sed 's/^/    /' || true
+        yellow "    Log completo: $CERTBOT_LOG"
+        yellow "    Cuando el DNS esté listo ejecuta:"
         yellow "    certbot --$CERTBOT_PLUGIN -d $DOMAIN --non-interactive --agree-tos -m $WP_ADMIN_EMAIL"
     fi
 fi
