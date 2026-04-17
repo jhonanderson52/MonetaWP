@@ -240,27 +240,33 @@ green "  ✓ Tema MonetaWP activado"
 
 # ── I. Plugins ────────────────────────────────────────────────────────────────
 step "Instalando plugins..."
+PLUGINS_URL="https://github.com/jhonanderson52/MonetaWP/raw/main/plugins"
+
 install_plugin() {
-    local slug=$1 label=$2
-    local out
-    out=$($WP plugin install "$slug" --activate 2>&1)
+    local slug=$1 label=$2 github_zip=$3
+    # Intentar primero desde el repo (evita bloqueos de red a wordpress.org)
+    if [[ -n "$github_zip" ]]; then
+        $WP plugin install "$PLUGINS_URL/$github_zip" --activate --force 2>/dev/null
+    else
+        $WP plugin install "$slug" --activate --force 2>/dev/null
+    fi
     if $WP plugin is-installed "$slug" 2>/dev/null; then
         green "    ✓ $label"
     else
-        yellow "    ⚠ $label no se instaló — reintentando..."
-        out=$($WP plugin install "$slug" --activate --force 2>&1)
+        # Segundo intento directo desde WordPress.org
+        $WP plugin install "$slug" --activate --force 2>/dev/null
         if $WP plugin is-installed "$slug" 2>/dev/null; then
-            green "    ✓ $label (segundo intento)"
+            green "    ✓ $label"
         else
-            yellow "    ✗ $label falló. Instala manualmente: wp plugin install $slug --activate"
+            yellow "    ✗ $label falló. Instala manualmente después: wp plugin install $slug --activate"
         fi
     fi
 }
 
-install_plugin "rank-math-seo"            "Rank Math SEO"
-install_plugin "litespeed-cache"          "LiteSpeed Cache"
-install_plugin "easy-table-of-contents"   "Easy Table of Contents"
-install_plugin "contact-form-7"           "Contact Form 7"
+install_plugin "seo-by-rank-math"         "Rank Math SEO"          "seo-by-rank-math.zip"
+install_plugin "litespeed-cache"          "LiteSpeed Cache"        ""
+install_plugin "easy-table-of-contents"   "Easy Table of Contents" ""
+install_plugin "contact-form-7"           "Contact Form 7"         "contact-form-7.zip"
 
 # ── J. Permalinks ─────────────────────────────────────────────────────────────
 step "Configurando permalinks..."
@@ -445,10 +451,16 @@ if [[ "${SETUP_SSL,,}" == "s" ]]; then
         apt-get install -y certbot python3-certbot-$CERTBOT_PLUGIN 2>&1 | grep -E 'install|already'
     fi
 
-    certbot --$CERTBOT_PLUGIN -d $DOMAIN -d www.$DOMAIN \
+    # Detectar si www.DOMAIN resuelve — solo incluirlo si tiene DNS
+    WWW_DOMAINS=""
+    if host "www.$DOMAIN" &>/dev/null 2>&1; then
+        WWW_DOMAINS="-d www.$DOMAIN"
+    fi
+
+    certbot --$CERTBOT_PLUGIN -d $DOMAIN $WWW_DOMAINS \
         --non-interactive --agree-tos -m $WP_ADMIN_EMAIL --redirect \
         && green "  ✓ SSL configurado" \
-        || yellow "  ⚠ SSL falló — verifica que el dominio apunte a este VPS y vuelve a ejecutar: certbot --$CERTBOT_PLUGIN -d $DOMAIN"
+        || yellow "  ⚠ SSL falló — una vez el DNS apunte al VPS ejecuta: certbot --$CERTBOT_PLUGIN -d $DOMAIN"
 fi
 
 # Actualizar URL del sitio a https si hay SSL
